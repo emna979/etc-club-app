@@ -1,0 +1,46 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isBureau() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'bureau';
+    }
+
+    // Profils des membres
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId
+                    && request.resource.data.role == 'membre'; // impossible de s'auto-promouvoir bureau à l'inscription
+      allow update: if isSignedIn() && request.auth.uid == userId
+                    && request.resource.data.role == resource.data.role; // un membre ne peut pas changer son propre rôle
+      // Le passage au rôle "bureau" se fait manuellement dans la console Firestore
+      // par un admin actuel (toi, pour l'instant), en modifiant le champ "role".
+    }
+
+    // Calendrier — lecture pour tous, écriture réservée au bureau
+    match /events/{eventId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isBureau();
+    }
+
+    // Chat général — lecture/écriture pour tout membre connecté
+    match /messages_general/{msgId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
+      allow update, delete: if false; // messages non modifiables/supprimables depuis le client
+    }
+
+    // Chat bureau — réservé au bureau exécutif, en lecture ET en écriture
+    match /messages_bureau/{msgId} {
+      allow read: if isBureau();
+      allow create: if isBureau() && request.resource.data.authorId == request.auth.uid;
+      allow update, delete: if false;
+    }
+  }
+}
