@@ -820,7 +820,7 @@ function BottomNav({ current, go, isBureau }) {
   const activeId = current === "chat-bureau" ? "chat-general" : current;
   return (
     <div style={{
-      position: "absolute", bottom: 0, left: 0, right: 0, display: "flex",
+      flexShrink: 0, display: "flex",
       padding: "8px 10px 14px", background: "rgba(1,15,40,0.92)", backdropFilter: "blur(10px)",
       borderTop: `1px solid ${C.line}`,
     }}>
@@ -842,115 +842,6 @@ function BottomNav({ current, go, isBureau }) {
     </div>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  APP ROOT                                                           */
-/* ------------------------------------------------------------------ */
-const SCREEN_TITLES = {
-  home: "Accueil",
-  calendar: "Calendrier",
-  documents: "Règlement & Code Électoral",
-  "chat-general": "Chat",
-  "chat-bureau": "Chat",
-};
-
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [screen, setScreen] = useState("home");
-
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (fbUser) => {
-      if (!fbUser) {
-        setUser(null);
-        setAuthLoading(false);
-        return;
-      }
-      try {
-        const snap = await getDoc(doc(db, "users", fbUser.uid));
-        const profile = snap.exists() ? snap.data() : { name: fbUser.email, role: "membre" };
-        setUser({ uid: fbUser.uid, email: fbUser.email, name: profile.name, role: profile.role || "membre" });
-      } catch (e) {
-        setUser({ uid: fbUser.uid, email: fbUser.email, name: fbUser.email, role: "membre" });
-      } finally {
-        setAuthLoading(false);
-      }
-    });
-    return unsub;
-  }, []);
-
-  const onAuth = {
-    login: async (email, password) => {
-      await signInWithEmailAndPassword(auth, email, password);
-    },
-    signup: async (name, email, password) => {
-      const cred = await createUserWithEmailAndPassword(auth, email, password);
-      await updateProfile(cred.user, { displayName: name });
-      await setDoc(doc(db, "users", cred.user.uid), {
-        name, email, role: "membre", createdAt: serverTimestamp(),
-      });
-    },
-  };
-
-  if (authLoading) {
-    return (
-      <Shell>
-        <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ color: C.gray, fontFamily: "Inter, sans-serif", fontSize: 13 }}>Chargement…</span>
-        </div>
-      </Shell>
-    );
-  }
-
-  if (!user) {
-    return (
-      <Shell>
-        <AuthScreen onAuth={onAuth} />
-      </Shell>
-    );
-  }
-
-  const isBureau = user.role === "bureau";
-  const showBack = screen !== "home";
-  const showTopBar = screen !== "home";
-
-  return (
-    <Shell>
-      <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-        {showTopBar && (
-          <TopBar
-            title={SCREEN_TITLES[screen]}
-            onBack={showBack ? () => setScreen("home") : null}
-            right={screen === "home" ? null : (
-              <button onClick={() => signOut(auth)} style={iconBtnStyle}>
-                <LogOut size={15} color="#fff" />
-              </button>
-            )}
-          />
-        )}
-        {screen === "home" && (
-          <div style={{ position: "relative" }}>
-            <div style={{
-              position: "absolute", top: 0, right: 10, display: "flex", gap: 6, padding: "12px 0", zIndex: 4,
-            }}>
-              <button onClick={() => signOut(auth)} style={iconBtnStyle}>
-                <LogOut size={15} color="#fff" />
-              </button>
-            </div>
-          </div>
-        )}
-        <div style={{ flex: 1, overflowY: "auto" }}>
-          {screen === "home" && <HomeScreen user={user} go={setScreen} />}
-          {screen === "calendar" && <CalendarScreen user={user} />}
-          {screen === "documents" && <DocumentsScreen />}
-          {(screen === "chat-general" || screen === "chat-bureau") && <ChatScreen user={user} />}
-        </div>
-        <BottomNav current={screen} go={setScreen} isBureau={isBureau} />
-      </div>
-    </Shell>
-  );
-}
-
 function useViewport() {
   const [vp, setVp] = useState({ w: typeof window !== "undefined" ? window.innerWidth : 390, h: typeof window !== "undefined" ? window.innerHeight : 780 });
   useEffect(() => {
