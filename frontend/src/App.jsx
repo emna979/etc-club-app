@@ -598,20 +598,18 @@ function AttachmentBubble({ attachment }) {
     </div>
   );
 }
-
 function ChatScreen({ user }) {
   const isBureau = user.role === "bureau";
   const [channel, setChannel] = useState("general");
   const [messages, setMessages] = useState([]);
   const [loadingMsgs, setLoadingMsgs] = useState(true);
   const [input, setInput] = useState("");
-  const [pendingFile, setPendingFile] = useState(null); // raw File, staged before sending
-  const [pendingPreview, setPendingPreview] = useState(null); // {kind,name,size,url?}
+  const [pendingFile, setPendingFile] = useState(null);
+  const [pendingPreview, setPendingPreview] = useState(null);
   const [uploading, setUploading] = useState(false);
   const endRef = useRef(null);
   const fileRef = useRef(null);
 
-  // On ne s'abonne au canal "bureau" que si l'utilisateur a le droit d'y accéder.
   useEffect(() => {
     if (channel === "bureau" && !isBureau) return;
     setLoadingMsgs(true);
@@ -637,7 +635,7 @@ function ChatScreen({ user }) {
         const form = new FormData();
         form.append("file", pendingFile);
         const res = await fetch(`${BACKEND_URL}/upload`, { method: "POST", body: form });
-        if (!res.ok) throw new Error("Échec de l’envoi du fichier");
+        if (!res.ok) throw new Error("Échec de l'envoi du fichier");
         const data = await res.json();
         attachment = { kind: data.kind, name: data.name, size: formatSize(data.size), url: data.url };
       }
@@ -654,7 +652,7 @@ function ChatScreen({ user }) {
       setPendingFile(null);
       setPendingPreview(null);
     } catch (e) {
-      alert("Impossible d’envoyer le message : " + e.message + "\n(Le backend d’upload est-il démarré ?)");
+      alert("Impossible d'envoyer le message : " + e.message);
     } finally {
       setUploading(false);
     }
@@ -662,7 +660,7 @@ function ChatScreen({ user }) {
 
   const onPickFile = (e) => {
     const file = e.target.files && e.target.files[0];
-    e.target.value = ""; // permet de re-sélectionner le même fichier
+    e.target.value = "";
     if (!file) return;
     setPendingFile(file);
     const isImage = file.type.startsWith("image/");
@@ -676,15 +674,15 @@ function ChatScreen({ user }) {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {isBureau && (
-        <div style={{ display: "flex", gap: 6, padding: "0 16px 12px" }}>
-          <ChanTab active={channel === "general"} onClick={() => setChannel("general")} icon={MessageCircle} label="Général" color={C.green} />
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      <div style={{ display: "flex", gap: 6, padding: "12px 16px", flexShrink: 0 }}>
+        <ChanTab active={channel === "general"} onClick={() => setChannel("general")} icon={MessageCircle} label="Général" color={C.green} />
+        {isBureau && (
           <ChanTab active={channel === "bureau"} onClick={() => setChannel("bureau")} icon={Shield} label="Bureau" color={C.aqua} />
-        </div>
-      )}
+        )}
+      </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
         {loadingMsgs && (
           <div style={{ color: C.gray, fontFamily: "Inter, sans-serif", fontSize: 12.5, textAlign: "center", padding: "20px 0" }}>
             Chargement des messages…
@@ -692,7 +690,7 @@ function ChatScreen({ user }) {
         )}
         {!loadingMsgs && messages.length === 0 && (
           <div style={{ color: C.gray, fontFamily: "Inter, sans-serif", fontSize: 12.5, textAlign: "center", padding: "20px 0" }}>
-            Aucun message pour l’instant. Lance la conversation !
+            Aucun message pour l'instant. Lance la conversation !
           </div>
         )}
         {messages.map((m) => {
@@ -741,7 +739,7 @@ function ChatScreen({ user }) {
       </div>
 
       {pendingPreview && (
-        <div style={{ margin: "0 16px 8px", display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 12, background: C.navyCard, border: `1px solid ${C.line}` }}>
+        <div style={{ margin: "8px 16px 0", display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 12, background: C.navyCard, border: `1px solid ${C.line}`, flexShrink: 0 }}>
           {pendingPreview.kind === "image" ? (
             <img src={pendingPreview.url} alt={pendingPreview.name} style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover" }} />
           ) : (
@@ -759,7 +757,7 @@ function ChatScreen({ user }) {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, padding: "10px 16px 18px", alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 8, padding: "10px 16px 18px", alignItems: "center", flexShrink: 0 }}>
         <input
           ref={fileRef}
           type="file"
