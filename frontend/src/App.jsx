@@ -395,11 +395,18 @@ function CalendarScreen({ user }) {
   const [draft, setDraft] = useState({ date: "", title: "", place: "", tag: "Réunion" });
 
   useEffect(() => {
-    const q = query(collection(db, "events"), orderBy("createdAt", "desc"));
-    const unsub = onSnapshot(q, (snap) => {
-      setEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setLoading(false);
-    });
+    const q = query(collection(db, "events"), orderBy("date", "asc"));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+      },
+      (error) => {
+        console.error("Unable to load calendar events:", error);
+        setLoading(false);
+      },
+    );
     return unsub;
   }, []);
 
@@ -451,7 +458,7 @@ function CalendarScreen({ user }) {
 
       {showForm && (
         <div style={{ background: C.navyCard, borderRadius: 14, padding: 14, marginBottom: 14, border: `1px solid ${C.line}`, display: "flex", flexDirection: "column", gap: 10 }}>
-          <Field label="Date (ex : 12 AOÛT)" value={draft.date} onChange={(v) => setDraft({ ...draft, date: v })} placeholder="12 AOÛT" />
+          <Field label="Date" type="date" value={draft.date} onChange={(v) => setDraft({ ...draft, date: v })} />
           <Field label="Titre" value={draft.title} onChange={(v) => setDraft({ ...draft, title: v })} placeholder="Réunion de pôle Marketing" />
           <Field label="Lieu" value={draft.place} onChange={(v) => setDraft({ ...draft, place: v })} placeholder="Local ETC — ENSTAB" />
           <div>
@@ -598,9 +605,9 @@ function AttachmentBubble({ attachment }) {
     </div>
   );
 }
-function ChatScreen({ user }) {
+function ChatScreen({ user, initialChannel = "general" }) {
   const isBureau = user.role === "bureau";
-  const [channel, setChannel] = useState("general");
+  const [channel, setChannel] = useState(initialChannel);
   const [messages, setMessages] = useState([]);
   const [loadingMsgs, setLoadingMsgs] = useState(true);
   const [input, setInput] = useState("");
@@ -611,14 +618,25 @@ function ChatScreen({ user }) {
   const fileRef = useRef(null);
 
   useEffect(() => {
+    setChannel(initialChannel);
+  }, [initialChannel]);
+
+  useEffect(() => {
     if (channel === "bureau" && !isBureau) return;
     setLoadingMsgs(true);
     const colName = channel === "bureau" ? "messages_bureau" : "messages_general";
     const q = query(collection(db, colName), orderBy("createdAt", "asc"), limit(200));
-    const unsub = onSnapshot(q, (snap) => {
-      setMessages(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setLoadingMsgs(false);
-    });
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setMessages(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setLoadingMsgs(false);
+      },
+      (error) => {
+        console.error("Unable to load chat messages:", error);
+        setLoadingMsgs(false);
+      },
+    );
     return unsub;
   }, [channel, isBureau]);
 
@@ -634,7 +652,12 @@ function ChatScreen({ user }) {
       if (pendingFile) {
         const form = new FormData();
         form.append("file", pendingFile);
-        const res = await fetch(`${BACKEND_URL}/upload`, { method: "POST", body: form });
+        const token = await auth.currentUser?.getIdToken();
+        const res = await fetch(`${BACKEND_URL}/upload`, {
+          method: "POST",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: form,
+        });
         if (!res.ok) throw new Error("Échec de l'envoi du fichier");
         const data = await res.json();
         attachment = { kind: data.kind, name: data.name, size: formatSize(data.size), url: data.url };
@@ -897,3 +920,63 @@ function Shell({ children }) {
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/*  APP ROOT                                                           */
+/* ------------------------------------------------------------------ */
+function App() {
+  const [user, setUser] = useState(null);
+  const [loadingUser, setLoadingUser] = useState(true);
+  const [screen, setScreen] = useState("home");
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!firebaseUser) {
+        setUser(null);
+        setLoadingUser(false);
+        return;
+      }
+
+      try {
+        const profile = await getDoc(doc(db, "users", firebaseUser.uid));
+        if (!profile.exists()) throw new Error("Profil utilisateur introuvable. Contacte un administrateur.");
+        const data = profile.data();
+        setUser({ uid: firebaseUser.uid, name: data.name || firebaseUser.displayName || "Membre", role: data.role || "membre" });
+      } catch (error) {
+        console.error("Unable to load user profile:", error);
+        setUser(null);
+      } finally {
+        setLoadingUser(false);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  const onAuth = {
+    login: (email, password) => signInWithEmailAndPassword(auth, email, password),
+    signup: async (name, email, password) => {
+      const credential = await createUserWithEmailAndPassword(auth, email, password);
+      await updateProfile(credential.user, { displayName: name });
+      await setDoc(doc(db, "users", credential.user.uid), { name, email, role: "membre", createdAt: serverTimestamp() });
+      setUser({ uid: credential.user.uid, name, role: "membre" });
+      setScreen("home");
+    },
+  };
+
+  const titles = { home: "Accueil", calendar: "Calendrier", documents: "Documents", "chat-general": "Chat", "chat-bureau": "Chat Bureau" };
+  let content;
+  if (loadingUser) content = <div style={{ color: "#fff", padding: 24, textAlign: "center" }}>Chargement…</div>;
+  else if (!user) content = <AuthScreen onAuth={onAuth} />;
+  else {
+    const currentScreen = screen === "chat-bureau" && user.role !== "bureau" ? "home" : screen;
+    const page = currentScreen === "calendar" ? <CalendarScreen user={user} /> : currentScreen === "documents" ? <DocumentsScreen /> : currentScreen.startsWith("chat-") ? <ChatScreen user={user} initialChannel={currentScreen === "chat-bureau" ? "bureau" : "general"} /> : <HomeScreen user={user} go={setScreen} />;
+    content = <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      <TopBar title={titles[currentScreen]} right={<button onClick={() => signOut(auth)} title="Se déconnecter" style={iconBtnStyle}><LogOut size={17} color="#fff" /></button>} />
+      <main style={{ flex: 1, minHeight: 0, overflowY: currentScreen.startsWith("chat-") ? "hidden" : "auto" }}>{page}</main>
+      <BottomNav current={currentScreen} go={setScreen} isBureau={user.role === "bureau"} />
+    </div>;
+  }
+  return <Shell>{content}</Shell>;
+}
+
+export default App;
