@@ -2,15 +2,16 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   Home, Calendar, FileText, MessageCircle, Lock, Plus, Send,
   ChevronLeft, ChevronDown, LogOut, Shield, User, X, Check,
-  ScrollText, Gavel, Users, Radio, Paperclip, File as FileIcon, Download
+  ScrollText, Gavel, Users, Radio, Paperclip, File as FileIcon, Download,
+  ListChecks, Trash2
 } from "lucide-react";
 import {
   onAuthStateChanged, createUserWithEmailAndPassword,
-  signInWithEmailAndPassword, signOut, updateProfile,
+  signInWithEmailAndPassword, signOut, updateProfile, sendPasswordResetEmail,
 } from "firebase/auth";
 import {
   doc, setDoc, getDoc, collection, addDoc, query, orderBy,
-  onSnapshot, serverTimestamp, limit,
+  onSnapshot, serverTimestamp, limit, where, updateDoc, deleteDoc,
 } from "firebase/firestore";
 import { auth, db, BACKEND_URL } from "./firebase.js";
 
@@ -181,16 +182,19 @@ function Accordion({ items }) {
 /*  AUTH SCREEN                                                        */
 /* ------------------------------------------------------------------ */
 function AuthScreen({ onAuth }) {
-  const [mode, setMode] = useState("login"); // login | signup
+  const [mode, setMode] = useState("login"); // login | signup | reset
+  const [info, setInfo] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const canSubmit = mode === "login"
-    ? email.trim() && password.trim()
-    : name.trim() && email.trim() && password.trim();
+  const canSubmit = mode === "reset"
+    ? email.trim()
+    : mode === "login"
+      ? email.trim() && password.trim()
+      : name.trim() && email.trim() && password.trim();
 
   const AUTH_ERRORS = {
     "auth/email-already-in-use": "Un compte existe déjà avec cet e-mail.",
@@ -199,14 +203,20 @@ function AuthScreen({ onAuth }) {
     "auth/invalid-credential": "E-mail ou mot de passe incorrect.",
     "auth/user-not-found": "Aucun compte ne correspond à cet e-mail.",
     "auth/wrong-password": "E-mail ou mot de passe incorrect.",
+    "auth/too-many-requests": "Trop de tentatives, réessaie dans quelques minutes.",
+    "auth/network-request-failed": "Problème de connexion, vérifie ton réseau.",
   };
 
   const submit = async () => {
     if (!canSubmit || loading) return;
     setError("");
+    setInfo("");
     setLoading(true);
     try {
-      if (mode === "login") {
+      if (mode === "reset") {
+        await onAuth.reset(email.trim());
+        setInfo("Si un compte existe avec cet e-mail, un lien de réinitialisation vient d’être envoyé. Pense à vérifier tes spams.");
+      } else if (mode === "login") {
         await onAuth.login(email.trim(), password);
       } else {
         await onAuth.signup(name.trim(), email.trim(), password);
@@ -231,8 +241,8 @@ function AuthScreen({ onAuth }) {
         display: "flex", background: C.navyCard, borderRadius: 12, padding: 4, marginBottom: 22,
         border: `1px solid ${C.line}`,
       }}>
-        {["login", "signup"].map((m) => (
-          <button key={m} onClick={() => setMode(m)} style={{
+        {mode !== "reset" && ["login", "signup"].map((m) => (
+          <button key={m} onClick={() => { setMode(m); setError(""); setInfo(""); }} style={{
             flex: 1, padding: "9px 0", borderRadius: 9, border: "none", cursor: "pointer",
             fontFamily: "Sora, sans-serif", fontWeight: 600, fontSize: 12.5,
             background: mode === m ? C.orange : "transparent",
@@ -245,15 +255,36 @@ function AuthScreen({ onAuth }) {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {mode === "signup" && (
-          <Field label="Nom complet" value={name} onChange={setName} placeholder="foulen fouleni" />
+          <Field label="Nom complet" value={name} onChange={setName} placeholder="Rania Meddah" />
+        )}
+        {mode === "reset" && (
+          <div style={{ color: C.gray, fontSize: 12, fontFamily: "Inter, sans-serif", lineHeight: 1.5 }}>
+            Entre l’adresse e-mail de ton compte : on t’envoie un lien pour choisir un nouveau mot de passe.
+          </div>
         )}
         <Field label="Adresse e-mail" value={email} onChange={setEmail} placeholder="prenom.nom@gmail.com" />
-        <Field label="Mot de passe" value={password} onChange={setPassword} placeholder="••••••••" type="password" />
+        {mode !== "reset" && (
+          <Field label="Mot de passe" value={password} onChange={setPassword} placeholder="••••••••" type="password" />
+        )}
+        {mode === "login" && (
+          <button onClick={() => { setMode("reset"); setError(""); setInfo(""); }} style={{
+            alignSelf: "flex-end", background: "transparent", border: "none", cursor: "pointer",
+            color: C.aqua, fontFamily: "Inter, sans-serif", fontSize: 12, fontWeight: 600, padding: 0,
+          }}>Mot de passe oublié ?</button>
+        )}
 
         {mode === "signup" && (
           <div style={{ color: C.gray, fontSize: 10.5, fontFamily: "Inter, sans-serif", lineHeight: 1.5 }}>
             Ton compte est créé avec le statut « Membre ». Le passage au statut « Bureau exécutif » est fait manuellement par le Secrétaire Général.
           </div>
+        )}
+
+        {info && (
+          <div style={{
+            padding: "9px 12px", borderRadius: 10, background: "rgba(143,207,60,0.12)",
+            border: "1px solid rgba(143,207,60,0.4)", color: C.green,
+            fontFamily: "Inter, sans-serif", fontSize: 12, lineHeight: 1.5,
+          }}>{info}</div>
         )}
 
         {error && (
@@ -277,8 +308,14 @@ function AuthScreen({ onAuth }) {
           cursor: canSubmit && !loading ? "pointer" : "not-allowed", transition: "background .15s",
         }}
       >
-        {loading ? "Un instant…" : mode === "login" ? "Se connecter" : "Créer mon compte"}
+        {loading ? "Un instant…" : mode === "reset" ? "Envoyer le lien" : mode === "login" ? "Se connecter" : "Créer mon compte"}
       </button>
+      {mode === "reset" && (
+        <button onClick={() => { setMode("login"); setError(""); setInfo(""); }} style={{
+          marginTop: 12, background: "transparent", border: "none", cursor: "pointer",
+          color: C.gray, fontFamily: "Inter, sans-serif", fontSize: 12.5, fontWeight: 600,
+        }}>← Retour à la connexion</button>
+      )}
     </div>
   );
 }
@@ -325,6 +362,7 @@ function HomeScreen({ user, go }) {
   const isBureau = user.role === "bureau";
   const cards = [
     { id: "calendar", title: "Calendrier", desc: isBureau ? "Consulter et publier les événements" : "Consulter les événements du club", icon: Calendar, color: C.aqua },
+    { id: "tasks", title: "Tâches", desc: "Tableau de tâches de chaque pôle", icon: ListChecks, color: C.yellow },
     { id: "documents", title: "Règlement & Code Électoral", desc: "Règlement intérieur, sanctions, code électoral", icon: ScrollText, color: C.orange },
     { id: "chat-general", title: "Chat Général", desc: "Discussion ouverte à tous les membres", icon: MessageCircle, color: C.green },
     ...(isBureau ? [{ id: "chat-bureau", title: "Chat Bureau", desc: "Canal réservé au bureau exécutif", icon: Shield, color: C.royal }] : []),
@@ -395,18 +433,11 @@ function CalendarScreen({ user }) {
   const [draft, setDraft] = useState({ date: "", title: "", place: "", tag: "Réunion" });
 
   useEffect(() => {
-    const q = query(collection(db, "events"), orderBy("date", "asc"));
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        setLoading(false);
-      },
-      (error) => {
-        console.error("Unable to load calendar events:", error);
-        setLoading(false);
-      },
-    );
+    const q = query(collection(db, "events"), orderBy("createdAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      setEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    });
     return unsub;
   }, []);
 
@@ -458,7 +489,7 @@ function CalendarScreen({ user }) {
 
       {showForm && (
         <div style={{ background: C.navyCard, borderRadius: 14, padding: 14, marginBottom: 14, border: `1px solid ${C.line}`, display: "flex", flexDirection: "column", gap: 10 }}>
-          <Field label="Date" type="date" value={draft.date} onChange={(v) => setDraft({ ...draft, date: v })} />
+          <Field label="Date (ex : 12 AOÛT)" value={draft.date} onChange={(v) => setDraft({ ...draft, date: v })} placeholder="12 AOÛT" />
           <Field label="Titre" value={draft.title} onChange={(v) => setDraft({ ...draft, title: v })} placeholder="Réunion de pôle Marketing" />
           <Field label="Lieu" value={draft.place} onChange={(v) => setDraft({ ...draft, place: v })} placeholder="Local ETC — ENSTAB" />
           <div>
@@ -521,6 +552,218 @@ function CalendarScreen({ user }) {
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  TASKS SCREEN — un tableau par pôle, modifiable par ses responsables */
+/* ------------------------------------------------------------------ */
+const POLES = [
+  { id: "qualite", label: "Qualité", color: C.green },
+  { id: "projet", label: "Projet", color: C.orange },
+  { id: "marketing", label: "Marketing", color: C.yellow },
+  { id: "devco", label: "Dév. Commercial", color: C.royal },
+];
+
+const TASK_STATUS = [
+  { id: "todo", label: "À faire", color: C.gray },
+  { id: "doing", label: "En cours", color: C.orange },
+  { id: "done", label: "Terminé", color: C.green },
+];
+
+function TasksScreen({ user }) {
+  const [pole, setPole] = useState(POLES[0].id);
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState({ title: "", assignee: "", deadline: "" });
+
+  const poleInfo = POLES.find((p) => p.id === pole);
+  // Seuls les responsables de CE pôle peuvent modifier (la vraie sécurité est dans firestore.rules)
+  const canEdit = (user.responsableOf || []).includes(pole);
+
+  useEffect(() => {
+    setLoading(true);
+    setShowForm(false);
+    const q = query(collection(db, "tasks"), where("pole", "==", pole));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        list.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+        setTasks(list);
+        setLoading(false);
+      },
+      () => setLoading(false)
+    );
+    return unsub;
+  }, [pole]);
+
+  const addTask = async () => {
+    if (!draft.title.trim() || saving || !canEdit) return;
+    setSaving(true);
+    try {
+      await addDoc(collection(db, "tasks"), {
+        pole,
+        title: draft.title.trim(),
+        assignee: draft.assignee.trim(),
+        deadline: draft.deadline.trim(),
+        status: "todo",
+        createdBy: user.uid,
+        createdByName: user.name,
+        createdAt: serverTimestamp(),
+      });
+      setDraft({ title: "", assignee: "", deadline: "" });
+      setShowForm(false);
+    } catch (e) {
+      alert("Impossible d’ajouter la tâche : " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const cycleStatus = async (t) => {
+    if (!canEdit) return;
+    const i = TASK_STATUS.findIndex((s) => s.id === t.status);
+    const next = TASK_STATUS[(i + 1) % TASK_STATUS.length].id;
+    try {
+      await updateDoc(doc(db, "tasks", t.id), { status: next });
+    } catch (e) {
+      alert("Modification impossible : " + e.message);
+    }
+  };
+
+  const removeTask = async (t) => {
+    if (!canEdit || !window.confirm("Supprimer cette tâche ?")) return;
+    try {
+      await deleteDoc(doc(db, "tasks", t.id));
+    } catch (e) {
+      alert("Suppression impossible : " + e.message);
+    }
+  };
+
+  const counts = TASK_STATUS.map((s) => ({ ...s, n: tasks.filter((t) => t.status === s.id).length }));
+
+  return (
+    <div style={{ padding: "0 16px 90px" }}>
+      {/* Onglets de pôles */}
+      <div style={{ display: "flex", gap: 6, overflowX: "auto", padding: "4px 0 12px" }}>
+        {POLES.map((p) => {
+          const active = pole === p.id;
+          const mine = (user.responsableOf || []).includes(p.id);
+          return (
+            <button key={p.id} onClick={() => setPole(p.id)} style={{
+              flexShrink: 0, padding: "8px 12px", borderRadius: 10, cursor: "pointer",
+              border: `1px solid ${active ? p.color : C.line}`,
+              background: active ? `${p.color}1f` : "transparent",
+              color: active ? p.color : C.gray, fontFamily: "Inter, sans-serif", fontSize: 12, fontWeight: 600,
+              display: "flex", alignItems: "center", gap: 5,
+            }}>
+              {p.label}
+              {mine && <Shield size={11} />}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Bandeau de droits */}
+      {!canEdit ? (
+        <div style={{
+          marginBottom: 12, padding: "10px 12px", borderRadius: 10,
+          background: "rgba(157,157,155,0.12)", display: "flex", alignItems: "center", gap: 8,
+        }}>
+          <Lock size={13} color={C.gray} />
+          <span style={{ color: C.gray, fontFamily: "Inter, sans-serif", fontSize: 11.5 }}>
+            Seuls les responsables du pôle {poleInfo.label} peuvent modifier ces tâches.
+          </span>
+        </div>
+      ) : (
+        <button onClick={() => setShowForm(!showForm)} style={{
+          marginBottom: 12, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+          padding: "11px 0", borderRadius: 12, border: `1px dashed ${poleInfo.color}`,
+          background: showForm ? `${poleInfo.color}1f` : "transparent", color: poleInfo.color,
+          fontFamily: "Sora, sans-serif", fontWeight: 600, fontSize: 13, cursor: "pointer",
+        }}>
+          <Plus size={15} /> {showForm ? "Fermer" : "Ajouter une tâche"}
+        </button>
+      )}
+
+      {canEdit && showForm && (
+        <div style={{ background: C.navyCard, borderRadius: 14, padding: 14, marginBottom: 14, border: `1px solid ${C.line}`, display: "flex", flexDirection: "column", gap: 10 }}>
+          <Field label="Tâche" value={draft.title} onChange={(v) => setDraft({ ...draft, title: v })} placeholder="Préparer le planning de formation" />
+          <Field label="Assignée à" value={draft.assignee} onChange={(v) => setDraft({ ...draft, assignee: v })} placeholder="Prénom Nom" />
+          <Field label="Échéance" value={draft.deadline} onChange={(v) => setDraft({ ...draft, deadline: v })} placeholder="20 OCT" />
+          <button onClick={addTask} disabled={saving} style={{
+            marginTop: 4, padding: "10px 0", borderRadius: 10, border: "none",
+            background: C.orange, color: C.navyDeep, fontFamily: "Sora, sans-serif",
+            fontWeight: 700, fontSize: 13, cursor: saving ? "default" : "pointer", opacity: saving ? 0.7 : 1,
+          }}>{saving ? "Ajout…" : "Ajouter"}</button>
+        </div>
+      )}
+
+      {/* Compteurs */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        {counts.map((s) => (
+          <div key={s.id} style={{
+            flex: 1, padding: "8px 0", borderRadius: 10, textAlign: "center",
+            background: C.navyCard, border: `1px solid ${C.line}`,
+          }}>
+            <div style={{ color: s.color, fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{s.n}</div>
+            <div style={{ color: C.gray, fontFamily: "Inter, sans-serif", fontSize: 10.5 }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {loading && (
+        <div style={{ color: C.gray, fontFamily: "Inter, sans-serif", fontSize: 12.5, textAlign: "center", padding: "20px 0" }}>
+          Chargement des tâches…
+        </div>
+      )}
+      {!loading && tasks.length === 0 && (
+        <div style={{ color: C.gray, fontFamily: "Inter, sans-serif", fontSize: 12.5, textAlign: "center", padding: "20px 0" }}>
+          Aucune tâche pour le pôle {poleInfo.label}.
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {tasks.map((t) => {
+          const st = TASK_STATUS.find((s) => s.id === t.status) || TASK_STATUS[0];
+          return (
+            <div key={t.id} style={{
+              display: "flex", alignItems: "center", gap: 12, padding: 14, borderRadius: 14,
+              background: C.navyCard, border: `1px solid ${C.line}`,
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  color: "#fff", fontFamily: "Sora, sans-serif", fontWeight: 600, fontSize: 13.5,
+                  textDecoration: t.status === "done" ? "line-through" : "none",
+                  opacity: t.status === "done" ? 0.6 : 1,
+                }}>{t.title}</div>
+                <div style={{ color: C.gray, fontFamily: "Inter, sans-serif", fontSize: 11.5, marginTop: 3 }}>
+                  {t.assignee ? `👤 ${t.assignee}` : "Non assignée"}{t.deadline ? ` · ⏰ ${t.deadline}` : ""}
+                </div>
+                <button
+                  onClick={() => cycleStatus(t)}
+                  disabled={!canEdit}
+                  style={{
+                    marginTop: 8, padding: "3px 10px", borderRadius: 6, border: "none",
+                    fontSize: 10.5, fontFamily: "Inter, sans-serif", fontWeight: 600,
+                    background: `${st.color}25`, color: st.color,
+                    cursor: canEdit ? "pointer" : "default",
+                  }}
+                >{st.label}</button>
+              </div>
+              {canEdit && (
+                <button onClick={() => removeTask(t)} style={iconBtnStyle} aria-label="Supprimer">
+                  <Trash2 size={14} color={C.gray} />
+                </button>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -605,38 +848,29 @@ function AttachmentBubble({ attachment }) {
     </div>
   );
 }
-function ChatScreen({ user, initialChannel = "general" }) {
+
+function ChatScreen({ user }) {
   const isBureau = user.role === "bureau";
-  const [channel, setChannel] = useState(initialChannel);
+  const [channel, setChannel] = useState("general");
   const [messages, setMessages] = useState([]);
   const [loadingMsgs, setLoadingMsgs] = useState(true);
   const [input, setInput] = useState("");
-  const [pendingFile, setPendingFile] = useState(null);
-  const [pendingPreview, setPendingPreview] = useState(null);
+  const [pendingFile, setPendingFile] = useState(null); // raw File, staged before sending
+  const [pendingPreview, setPendingPreview] = useState(null); // {kind,name,size,url?}
   const [uploading, setUploading] = useState(false);
   const endRef = useRef(null);
   const fileRef = useRef(null);
 
-  useEffect(() => {
-    setChannel(initialChannel);
-  }, [initialChannel]);
-
+  // On ne s'abonne au canal "bureau" que si l'utilisateur a le droit d'y accéder.
   useEffect(() => {
     if (channel === "bureau" && !isBureau) return;
     setLoadingMsgs(true);
     const colName = channel === "bureau" ? "messages_bureau" : "messages_general";
     const q = query(collection(db, colName), orderBy("createdAt", "asc"), limit(200));
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setMessages(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        setLoadingMsgs(false);
-      },
-      (error) => {
-        console.error("Unable to load chat messages:", error);
-        setLoadingMsgs(false);
-      },
-    );
+    const unsub = onSnapshot(q, (snap) => {
+      setMessages(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setLoadingMsgs(false);
+    });
     return unsub;
   }, [channel, isBureau]);
 
@@ -652,13 +886,8 @@ function ChatScreen({ user, initialChannel = "general" }) {
       if (pendingFile) {
         const form = new FormData();
         form.append("file", pendingFile);
-        const token = await auth.currentUser?.getIdToken();
-        const res = await fetch(`${BACKEND_URL}/upload`, {
-          method: "POST",
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-          body: form,
-        });
-        if (!res.ok) throw new Error("Échec de l'envoi du fichier");
+        const res = await fetch(`${BACKEND_URL}/upload`, { method: "POST", body: form });
+        if (!res.ok) throw new Error("Échec de l’envoi du fichier");
         const data = await res.json();
         attachment = { kind: data.kind, name: data.name, size: formatSize(data.size), url: data.url };
       }
@@ -675,7 +904,7 @@ function ChatScreen({ user, initialChannel = "general" }) {
       setPendingFile(null);
       setPendingPreview(null);
     } catch (e) {
-      alert("Impossible d'envoyer le message : " + e.message);
+      alert("Impossible d’envoyer le message : " + e.message + "\n(Le backend d’upload est-il démarré ?)");
     } finally {
       setUploading(false);
     }
@@ -683,7 +912,7 @@ function ChatScreen({ user, initialChannel = "general" }) {
 
   const onPickFile = (e) => {
     const file = e.target.files && e.target.files[0];
-    e.target.value = "";
+    e.target.value = ""; // permet de re-sélectionner le même fichier
     if (!file) return;
     setPendingFile(file);
     const isImage = file.type.startsWith("image/");
@@ -697,15 +926,15 @@ function ChatScreen({ user, initialChannel = "general" }) {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div style={{ display: "flex", gap: 6, padding: "12px 16px", flexShrink: 0 }}>
-        <ChanTab active={channel === "general"} onClick={() => setChannel("general")} icon={MessageCircle} label="Général" color={C.green} />
-        {isBureau && (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {isBureau && (
+        <div style={{ display: "flex", gap: 6, padding: "0 16px 12px" }}>
+          <ChanTab active={channel === "general"} onClick={() => setChannel("general")} icon={MessageCircle} label="Général" color={C.green} />
           <ChanTab active={channel === "bureau"} onClick={() => setChannel("bureau")} icon={Shield} label="Bureau" color={C.aqua} />
-        )}
-      </div>
+        </div>
+      )}
 
-      <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
         {loadingMsgs && (
           <div style={{ color: C.gray, fontFamily: "Inter, sans-serif", fontSize: 12.5, textAlign: "center", padding: "20px 0" }}>
             Chargement des messages…
@@ -713,7 +942,7 @@ function ChatScreen({ user, initialChannel = "general" }) {
         )}
         {!loadingMsgs && messages.length === 0 && (
           <div style={{ color: C.gray, fontFamily: "Inter, sans-serif", fontSize: 12.5, textAlign: "center", padding: "20px 0" }}>
-            Aucun message pour l'instant. Lance la conversation !
+            Aucun message pour l’instant. Lance la conversation !
           </div>
         )}
         {messages.map((m) => {
@@ -762,7 +991,7 @@ function ChatScreen({ user, initialChannel = "general" }) {
       </div>
 
       {pendingPreview && (
-        <div style={{ margin: "8px 16px 0", display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 12, background: C.navyCard, border: `1px solid ${C.line}`, flexShrink: 0 }}>
+        <div style={{ margin: "0 16px 8px", display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 12, background: C.navyCard, border: `1px solid ${C.line}` }}>
           {pendingPreview.kind === "image" ? (
             <img src={pendingPreview.url} alt={pendingPreview.name} style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover" }} />
           ) : (
@@ -780,7 +1009,7 @@ function ChatScreen({ user, initialChannel = "general" }) {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, padding: "10px 16px 18px", alignItems: "center", flexShrink: 0 }}>
+      <div style={{ display: "flex", gap: 8, padding: "10px 16px 18px", alignItems: "center" }}>
         <input
           ref={fileRef}
           type="file"
@@ -837,13 +1066,14 @@ function BottomNav({ current, go, isBureau }) {
   const items = [
     { id: "home", label: "Accueil", icon: Home },
     { id: "calendar", label: "Calendrier", icon: Calendar },
+    { id: "tasks", label: "Tâches", icon: ListChecks },
     { id: "documents", label: "Docs", icon: FileText },
     { id: "chat-general", label: "Chat", icon: MessageCircle },
   ];
   const activeId = current === "chat-bureau" ? "chat-general" : current;
   return (
     <div style={{
-      flexShrink: 0, display: "flex",
+      position: "absolute", bottom: 0, left: 0, right: 0, display: "flex",
       padding: "8px 10px 14px", background: "rgba(1,15,40,0.92)", backdropFilter: "blur(10px)",
       borderTop: `1px solid ${C.line}`,
     }}>
@@ -865,6 +1095,123 @@ function BottomNav({ current, go, isBureau }) {
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/*  APP ROOT                                                           */
+/* ------------------------------------------------------------------ */
+const SCREEN_TITLES = {
+  home: "Accueil",
+  calendar: "Calendrier",
+  tasks: "Tâches",
+  documents: "Règlement & Code Électoral",
+  "chat-general": "Chat",
+  "chat-bureau": "Chat",
+};
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [screen, setScreen] = useState("home");
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (fbUser) => {
+      if (!fbUser) {
+        setUser(null);
+        setAuthLoading(false);
+        return;
+      }
+      try {
+        const snap = await getDoc(doc(db, "users", fbUser.uid));
+        const profile = snap.exists() ? snap.data() : { name: fbUser.email, role: "membre" };
+        setUser({
+          uid: fbUser.uid, email: fbUser.email, name: profile.name, role: profile.role || "membre",
+          responsableOf: Array.isArray(profile.responsableOf) ? profile.responsableOf : [],
+        });
+      } catch (e) {
+        setUser({ uid: fbUser.uid, email: fbUser.email, name: fbUser.email, role: "membre", responsableOf: [] });
+      } finally {
+        setAuthLoading(false);
+      }
+    });
+    return unsub;
+  }, []);
+
+  const onAuth = {
+    login: async (email, password) => {
+      await signInWithEmailAndPassword(auth, email, password);
+    },
+    reset: async (email) => {
+      await sendPasswordResetEmail(auth, email);
+    },
+    signup: async (name, email, password) => {
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      await updateProfile(cred.user, { displayName: name });
+      await setDoc(doc(db, "users", cred.user.uid), {
+        name, email, role: "membre", createdAt: serverTimestamp(),
+      });
+    },
+  };
+
+  if (authLoading) {
+    return (
+      <Shell>
+        <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ color: C.gray, fontFamily: "Inter, sans-serif", fontSize: 13 }}>Chargement…</span>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (!user) {
+    return (
+      <Shell>
+        <AuthScreen onAuth={onAuth} />
+      </Shell>
+    );
+  }
+
+  const isBureau = user.role === "bureau";
+  const showBack = screen !== "home";
+  const showTopBar = screen !== "home";
+
+  return (
+    <Shell>
+      <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+        {showTopBar && (
+          <TopBar
+            title={SCREEN_TITLES[screen]}
+            onBack={showBack ? () => setScreen("home") : null}
+            right={screen === "home" ? null : (
+              <button onClick={() => signOut(auth)} style={iconBtnStyle}>
+                <LogOut size={15} color="#fff" />
+              </button>
+            )}
+          />
+        )}
+        {screen === "home" && (
+          <div style={{ position: "relative" }}>
+            <div style={{
+              position: "absolute", top: 0, right: 10, display: "flex", gap: 6, padding: "12px 0", zIndex: 4,
+            }}>
+              <button onClick={() => signOut(auth)} style={iconBtnStyle}>
+                <LogOut size={15} color="#fff" />
+              </button>
+            </div>
+          </div>
+        )}
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {screen === "home" && <HomeScreen user={user} go={setScreen} />}
+          {screen === "calendar" && <CalendarScreen user={user} />}
+          {screen === "tasks" && <TasksScreen user={user} />}
+          {screen === "documents" && <DocumentsScreen />}
+          {(screen === "chat-general" || screen === "chat-bureau") && <ChatScreen user={user} />}
+        </div>
+        <BottomNav current={screen} go={setScreen} isBureau={isBureau} />
+      </div>
+    </Shell>
+  );
+}
+
 function useViewport() {
   const [vp, setVp] = useState({ w: typeof window !== "undefined" ? window.innerWidth : 390, h: typeof window !== "undefined" ? window.innerHeight : 780 });
   useEffect(() => {
@@ -920,63 +1267,3 @@ function Shell({ children }) {
     </div>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  APP ROOT                                                           */
-/* ------------------------------------------------------------------ */
-function App() {
-  const [user, setUser] = useState(null);
-  const [loadingUser, setLoadingUser] = useState(true);
-  const [screen, setScreen] = useState("home");
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) {
-        setUser(null);
-        setLoadingUser(false);
-        return;
-      }
-
-      try {
-        const profile = await getDoc(doc(db, "users", firebaseUser.uid));
-        if (!profile.exists()) throw new Error("Profil utilisateur introuvable. Contacte un administrateur.");
-        const data = profile.data();
-        setUser({ uid: firebaseUser.uid, name: data.name || firebaseUser.displayName || "Membre", role: data.role || "membre" });
-      } catch (error) {
-        console.error("Unable to load user profile:", error);
-        setUser(null);
-      } finally {
-        setLoadingUser(false);
-      }
-    });
-    return unsubscribe;
-  }, []);
-
-  const onAuth = {
-    login: (email, password) => signInWithEmailAndPassword(auth, email, password),
-    signup: async (name, email, password) => {
-      const credential = await createUserWithEmailAndPassword(auth, email, password);
-      await updateProfile(credential.user, { displayName: name });
-      await setDoc(doc(db, "users", credential.user.uid), { name, email, role: "membre", createdAt: serverTimestamp() });
-      setUser({ uid: credential.user.uid, name, role: "membre" });
-      setScreen("home");
-    },
-  };
-
-  const titles = { home: "Accueil", calendar: "Calendrier", documents: "Documents", "chat-general": "Chat", "chat-bureau": "Chat Bureau" };
-  let content;
-  if (loadingUser) content = <div style={{ color: "#fff", padding: 24, textAlign: "center" }}>Chargement…</div>;
-  else if (!user) content = <AuthScreen onAuth={onAuth} />;
-  else {
-    const currentScreen = screen === "chat-bureau" && user.role !== "bureau" ? "home" : screen;
-    const page = currentScreen === "calendar" ? <CalendarScreen user={user} /> : currentScreen === "documents" ? <DocumentsScreen /> : currentScreen.startsWith("chat-") ? <ChatScreen user={user} initialChannel={currentScreen === "chat-bureau" ? "bureau" : "general"} /> : <HomeScreen user={user} go={setScreen} />;
-    content = <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <TopBar title={titles[currentScreen]} right={<button onClick={() => signOut(auth)} title="Se déconnecter" style={iconBtnStyle}><LogOut size={17} color="#fff" /></button>} />
-      <main style={{ flex: 1, minHeight: 0, overflowY: currentScreen.startsWith("chat-") ? "hidden" : "auto" }}>{page}</main>
-      <BottomNav current={currentScreen} go={setScreen} isBureau={user.role === "bureau"} />
-    </div>;
-  }
-  return <Shell>{content}</Shell>;
-}
-
-export default App;

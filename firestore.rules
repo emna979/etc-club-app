@@ -12,13 +12,21 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'bureau';
     }
 
+    // Responsable d'un pôle donné (champ "responsableOf" = liste d'ids de pôles, ex. ["marketing"])
+    function isResponsable(pole) {
+      return isSignedIn() &&
+        pole in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('responsableOf', []);
+    }
+
     // Profils des membres
     match /users/{userId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && request.auth.uid == userId
-                    && request.resource.data.role == 'membre'; // impossible de s'auto-promouvoir bureau à l'inscription
+                    && request.resource.data.role == 'membre'
+                    && !('responsableOf' in request.resource.data); // impossible de s'auto-promouvoir bureau à l'inscription
       allow update: if isSignedIn() && request.auth.uid == userId
-                    && request.resource.data.role == resource.data.role; // un membre ne peut pas changer son propre rôle
+                    && request.resource.data.role == resource.data.role // un membre ne peut pas changer son propre rôle
+                    && request.resource.data.get('responsableOf', []) == resource.data.get('responsableOf', []); // ni s'auto-nommer responsable
       // Le passage au rôle "bureau" se fait manuellement dans la console Firestore
       // par un admin actuel (toi, pour l'instant), en modifiant le champ "role".
     }
@@ -27,6 +35,16 @@ service cloud.firestore {
     match /events/{eventId} {
       allow read: if isSignedIn();
       allow create, update, delete: if isBureau();
+    }
+
+    // Tâches — un tableau par pôle. Lecture pour tout membre connecté,
+    // écriture réservée aux responsables du pôle concerné (et seulement lui).
+    match /tasks/{taskId} {
+      allow read: if isSignedIn();
+      allow create: if isResponsable(request.resource.data.pole);
+      allow update: if isResponsable(resource.data.pole)
+                    && request.resource.data.pole == resource.data.pole;
+      allow delete: if isResponsable(resource.data.pole);
     }
 
     // Chat général — lecture/écriture pour tout membre connecté

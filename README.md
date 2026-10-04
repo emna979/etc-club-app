@@ -44,6 +44,18 @@ membre au bureau exécutif :
 3. Change le champ `role` de `"membre"` à `"bureau"`
 4. Le membre doit se reconnecter (ou recharger l'app) pour que ça prenne effet
 
+## 3 bis. Nommer les responsables de pôle (section « Tâches »)
+
+Chaque pôle a son propre tableau de tâches, visible par tous mais modifiable **uniquement**
+par ses responsables. Pour nommer un responsable :
+
+1. Console Firebase → **Firestore Database → Données** → collection `users` → document du membre
+2. Ajoute un champ `responsableOf` de type **array** contenant l'id du ou des pôles :
+   `qualite`, `projet`, `marketing`, `devco`
+   (ex. `["marketing"]`)
+3. Republie `firestore.rules` (il y a une nouvelle collection `tasks`)
+4. Le membre recharge l'app pour que ça prenne effet
+
 ## 4. Déployer pour de vrai (PWA, accessible par lien)
 
 ### Backend
